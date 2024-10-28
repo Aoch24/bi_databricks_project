@@ -42,7 +42,7 @@ import pyspark.sql.functions as f
 # COMMAND ----------
 
 df_empresa = df_empresa.withColumn('tamanho_loja', f.col('tamanho_loja').cast('float'))
-df_empresa = df_empresa.withColumn('cod_loja', f.col('tamanho_loja').cast('integer'))
+df_empresa = df_empresa.withColumn('cod_loja', f.col('cod_loja').cast('integer'))
 
 # COMMAND ----------
 
@@ -301,7 +301,7 @@ display(df_tempo)
 
 # COMMAND ----------
 
-df_notas.write.format("delta").mode("overwrite").save(f"{path_silver}/tbl_tempo")
+df_tempo.write.format("delta").mode("overwrite").save(f"{path_silver}/tbl_tempo")
 display(dbutils.fs.ls(f"{path_silver}/tbl_tempo"))
 
 # COMMAND ----------
@@ -399,4 +399,75 @@ for file in files_names_proccesed:
 
 # COMMAND ----------
 
-display(dbutils.fs.ls(f"{path_out}"))
+# MAGIC %md
+# MAGIC # Compras
+
+# COMMAND ----------
+
+path_in = f'{path_bronze}/compra/'
+path_out = f'{path_bronze}/compra/consumidos'
+
+dfs = []
+
+for file in dbutils.fs.ls(path_in):
+    filename = file.name
+    if filename.startswith('Compras_') and filename.endswith('.csv'):
+        df_temp = spark.read.csv(os.path.join(path_in, filename), header=True, sep=';')
+        df_temp = df_temp.withColumn('arquivo_origem', f.lit(filename))
+        dfs.append(df_temp)
+
+if dfs:
+    df_compras = dfs[0]
+    for df in dfs[1:]:
+        df_compras = df_compras.union(df)
+
+# COMMAND ----------
+
+df_compras = df_compras.orderBy('mes_ano','codigo_produto')
+display(df_compras)
+
+# COMMAND ----------
+
+from pyspark.sql.types import DecimalType
+
+# COMMAND ----------
+
+df_compras = df_compras.withColumn('preco_compra', f.regexp_replace("preco_compra", ",", ".").cast(DecimalType(10,2)))
+
+# COMMAND ----------
+
+df_compras = df_compras.select(df_compras.mes_ano,
+                                 df_compras.codigo_produto.alias('cod_produto'),
+                                 df_compras.preco_compra,
+                                 df_compras.arquivo_origem,
+                                 f.current_timestamp().alias('data_carga'))
+
+# COMMAND ----------
+
+display(df_compras)
+
+# COMMAND ----------
+
+df_compras.write.format("delta").mode("overwrite").save(f"{path_silver}/tbl_compras")
+
+# COMMAND ----------
+
+files_names_proccesed = df_compras.select('arquivo_origem').distinct().orderBy('arquivo_origem').rdd.flatMap(lambda x: x).collect()
+
+try:
+    dbutils.fs.ls(path_out)
+except Exception as e:
+    dbutils.fs.mkdirs(path_out)
+
+for file in files_names_proccesed:
+    file_in_path = f"{path_in}/{file}"
+    file_out_path = f"{path_out}/{file}"
+    try:
+        dbutils.fs.ls(file_in_path)
+        dbutils.fs.mv(file_in_path, file_out_path, recurse=True)
+    except Exception as e:
+        print('Error: {e}')
+
+# COMMAND ----------
+
+display(dbutils.fs.ls(f"{path_bronze}/compra"))
