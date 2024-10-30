@@ -107,7 +107,33 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # 3.Criando a tabela de Fatos
+# MAGIC # 3. Inserindo os dados ND
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC INSERT INTO dim_cliente VALUES
+# MAGIC (0, 'ND', 'ND', 'ND', 'ND', 'ND', 'ND', 'ND', 'ND', 'ND', 'ND', 'ND');
+# MAGIC INSERT INTO dim_departamento VALUES
+# MAGIC ('ND', 'ND');
+# MAGIC INSERT INTO dim_fornecedor VALUES
+# MAGIC ('ND', 'ND');
+# MAGIC INSERT INTO dim_empresa VALUES
+# MAGIC (0, 'ND', 'ND', 'ND', 'ND', 'ND');
+# MAGIC INSERT INTO dim_producto VALUES
+# MAGIC (0, 'ND', 'ND', 'ND', 'ND', 'ND');
+# MAGIC INSERT INTO dim_tiempo VALUES
+# MAGIC (0, 'ND', '1900-01-01 00:00:00', 'ND', false, 'ND', 'ND', 'ND', 'ND', 'ND', 'ND', 'ND');
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # 4.Criando as tabelas de Fatos
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Vendas
 
 # COMMAND ----------
 
@@ -131,20 +157,47 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # 4. Inserindo os dados ND
+# MAGIC ## Tendencia
 
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC INSERT INTO dim_cliente VALUES
-# MAGIC (0, 'ND', 'ND', 'ND', 'ND', 'ND', 'ND', 'ND', 'ND', 'ND', 'ND', 'ND');
-# MAGIC INSERT INTO dim_departamento VALUES
-# MAGIC ('ND', 'ND');
-# MAGIC INSERT INTO dim_fornecedor VALUES
-# MAGIC ('ND', 'ND');
-# MAGIC INSERT INTO dim_empresa VALUES
-# MAGIC (0, 'ND', 'ND', 'ND', 'ND', 'ND');
-# MAGIC INSERT INTO dim_producto VALUES
-# MAGIC (0, 'ND', 'ND', 'ND', 'ND', 'ND');
-# MAGIC INSERT INTO dim_tiempo VALUES
-# MAGIC (0, 'ND', '1900-01-01 00:00:00', 'ND', false, 'ND', 'ND', 'ND', 'ND', 'ND', 'ND', 'ND');
+# MAGIC CREATE TABLE IF NOT EXISTS fact_tendencia
+# MAGIC (
+# MAGIC id_loja INT NOT NULL, 
+# MAGIC id_cliente INT NOT NULL, 
+# MAGIC id_producto INT NOT NULL, 
+# MAGIC id_dia INT NOT NULL,
+# MAGIC quantidade_vendida_tend FLOAT NOT NULL, 
+# MAGIC valor_venda_tend FLOAT NOT NULL, 
+# MAGIC custo_venda_tend FLOAT NOT NULL,
+# MAGIC PRIMARY KEY (id_loja, id_cliente, id_producto, id_dia),
+# MAGIC FOREIGN KEY (id_loja) REFERENCES dim_empresa(id_loja),
+# MAGIC FOREIGN KEY (id_cliente) REFERENCES dim_cliente(id_cliente),
+# MAGIC FOREIGN KEY (id_producto) REFERENCES dim_producto(id_producto),
+# MAGIC FOREIGN KEY (id_dia) REFERENCES dim_tiempo(id_dia)
+# MAGIC ) USING DELTA;
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Orcado
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC CREATE TABLE fact_orcado
+# MAGIC (
+# MAGIC id_loja INT NOT NULL, 
+# MAGIC id_cliente INT NOT NULL, 
+# MAGIC id_producto INT NOT NULL, 
+# MAGIC id_dia INT NOT NULL,
+# MAGIC quantidade_vendida_orcado FLOAT NOT NULL, 
+# MAGIC valor_venda_orcado FLOAT NOT NULL, 
+# MAGIC custo_venda_orcado FLOAT NOT NULL, 
+# MAGIC PRIMARY KEY (id_loja, id_cliente, id_producto, id_dia),
+# MAGIC FOREIGN KEY (id_loja) REFERENCES dim_empresa(id_loja),
+# MAGIC FOREIGN KEY (id_cliente) REFERENCES dim_cliente(id_cliente),
+# MAGIC FOREIGN KEY (id_producto) REFERENCES dim_producto(id_producto),
+# MAGIC FOREIGN KEY (id_dia) REFERENCES dim_tiempo(id_dia)
+# MAGIC ) USING DELTA;

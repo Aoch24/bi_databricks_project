@@ -471,3 +471,57 @@ for file in files_names_proccesed:
 # COMMAND ----------
 
 display(dbutils.fs.ls(f"{path_bronze}/compra"))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Orcamento Consolidado
+
+# COMMAND ----------
+
+df_orcamento = spark.read.csv(f'{path_bronze}/orcamento_consolidado.csv', header=True, sep=',', encoding='latin1')
+display(df_orcamento)
+
+# COMMAND ----------
+
+df_orcamento = df_orcamento.withColumn('quantidade_vendida_orc', f.col('quantidade_vendida_orc').cast('float'))\
+                        .withColumn('custo_venda_orc', f.col('custo_venda_orc').cast('float'))\
+                        .withColumn('valor_venda_orc', f.col('valor_venda_orc').cast('float'))
+
+# COMMAND ----------
+
+df_orcamento = df_orcamento.withColumn('arquivo_origem', f.lit('orcamento_consolidado.csv'))\
+                            .withColumn('data_carga', f.current_timestamp())
+
+display(df_orcamento)
+
+# COMMAND ----------
+
+df_orcamento.write.format("delta").mode("overwrite").save(f"{path_silver}/tbl_orcamento_consolidado")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Tendencia
+
+# COMMAND ----------
+
+df_tendencia = spark.read.csv(f'{path_bronze}/tendencia.csv', header=True, sep=',', encoding='latin1')
+display(df_tendencia)
+
+# COMMAND ----------
+
+df_tendencia = df_tendencia.withColumn('quantidade_vendida_tend', f.col('quantidade_vendida_tend').cast('float'))\
+                        .withColumn('custo_venda_tend', f.col('custo_venda_tend').cast('float'))\
+                        .withColumn('valor_venda_tend', f.col('valor_venda_tend').cast('float'))
+
+# COMMAND ----------
+
+df_tendencia = df_tendencia.withColumn('arquivo_origem', f.lit('tendencia.csv'))\
+                            .withColumn('data_carga', f.current_timestamp())
+
+display(df_tendencia)
+
+# COMMAND ----------
+
+df_tendencia.write.format("delta").mode("overwrite").save(f"{path_silver}/tbl_tendencia")

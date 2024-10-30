@@ -13,7 +13,7 @@ path_silver = '/mnt/bi_project/silver'
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1.Carregando e transformando a capa silver
+# MAGIC ## 1.Carregando e transformando a camada silver
 
 # COMMAND ----------
 
@@ -625,3 +625,190 @@ WHEN NOT MATCHED THEN
 
 fato_vendas_gold = spark.table("databricks_project.dw_atacadez.fact_venta")
 display(fato_vendas_gold.orderBy('id_dia'))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Carregando a tabela de Fatos Orcamento
+
+# COMMAND ----------
+
+spark.sql("USE databricks_project.dw_atacadez")
+
+df_vendas_realizadas = spark.sql("""
+SELECT 
+dim_empresa.id_loja, 
+dim_producto.id_producto, 
+dim_tiempo.id_dia, 
+dim_empresa.cod_loja, 
+dim_departamento.desc_sector, 
+dim_tiempo.cod_mes, 
+SUM(fact_venta.cant_vendida) as quantidade_vendida, 
+SUM(fact_venta.valor_venta) as valor_venda, 
+SUM(fact_venta.costo_venta) as custo_venda
+FROM     dim_departamento INNER JOIN
+                  dim_producto ON dim_departamento.cod_sector = dim_producto.cod_sector INNER JOIN
+                  fact_venta ON dim_producto.id_producto = fact_venta.id_producto INNER JOIN
+                  dim_empresa ON fact_venta.id_loja = dim_empresa.id_loja INNER JOIN
+                  dim_tiempo ON fact_venta.id_dia = dim_tiempo.id_dia
+GROUP BY 
+dim_empresa.id_loja, 
+dim_producto.id_producto, 
+dim_tiempo.id_dia, 
+dim_empresa.cod_loja, 
+dim_departamento.desc_sector, 
+dim_tiempo.cod_mes
+                                 """)
+
+display(df_vendas_realizadas)
+
+# COMMAND ----------
+
+df_vendas_consolidadas = spark.sql("""
+SELECT dim_empresa.cod_loja, 
+dim_departamento.desc_sector, 
+dim_tiempo.cod_mes, 
+SUM(fact_venta.cant_vendida) AS quantidade_vendida_total, 
+SUM(fact_venta.valor_venta) AS valor_venda_total, 
+SUM(fact_venta.costo_venta) AS custo_venda_total
+FROM     dim_departamento INNER JOIN
+                  dim_producto ON dim_departamento.cod_sector = dim_producto.cod_sector INNER JOIN
+                  fact_venta ON dim_producto.id_producto = fact_venta.id_producto INNER JOIN
+                  dim_empresa ON fact_venta.id_loja = dim_empresa.id_loja INNER JOIN
+                  dim_tiempo ON fact_venta.id_dia = dim_tiempo.id_dia
+GROUP BY
+dim_empresa.cod_loja, 
+dim_departamento.desc_sector, 
+dim_tiempo.cod_mes
+                                   """)
+
+display(df_vendas_consolidadas)
+
+# COMMAND ----------
+
+df_orcamento = spark.read.format("delta").load(f"{path_silver}/tbl_orcamento_consolidado")
+display(df_orcamento)
+
+# COMMAND ----------
+
+df_vendas_realizadas_consolidadas = df_vendas_realizadas.join(df_vendas_consolidadas,
+                                               (df_vendas_realizadas.cod_loja == df_vendas_consolidadas.cod_loja)
+                                               & (df_vendas_realizadas.cod_mes == df_vendas_consolidadas.cod_mes)
+                                               & (df_vendas_realizadas.desc_sector == df_vendas_consolidadas.desc_sector),
+                                               "inner")\
+                                                .drop(df_vendas_consolidadas.cod_loja,
+                                                                df_vendas_consolidadas.cod_mes, 
+                                                                df_vendas_consolidadas.desc_sector)\
+                                                .orderBy(df_vendas_realizadas.cod_loja,
+                                                                df_vendas_realizadas.cod_mes, 
+                                                                df_vendas_realizadas.desc_sector)
+
+display(df_vendas_realizadas_consolidadas)
+
+# COMMAND ----------
+
+df_vendas_realizadas_consolidadas = df_vendas_realizadas_consolidadas\
+    .withColumn("quantidade_vendida_porcentual_distribuicao", f.col("quantidade_vendida") / f.col("quantidade_vendida_total"))\
+    .withColumn("valor_venda_porcentual_distribuicao", f.col("valor_venda") / f.col("valor_venda_total"))\
+    .withColumn("custo_venda_porcentual_distribuicao", f.col("custo_venda") / f.col("custo_venda_total"))
+
+# COMMAND ----------
+
+df_vendas_join_realizadas_orcadas = df_vendas_realizadas_consolidadas.join(df_orcamento,
+                                               (df_vendas_realizadas_consolidadas.cod_loja == df_orcamento.cod_loja)
+                                               & (df_vendas_realizadas_consolidadas.cod_mes == df_orcamento.cod_mes)
+                                               & (df_vendas_realizadas_consolidadas.desc_sector == df_orcamento.desc_departamento),
+                                               "inner")\
+                                                .drop(df_orcamento.cod_loja,
+                                                                df_orcamento.cod_mes, 
+                                                                df_orcamento.desc_departamento,
+                                                                df_orcamento.arquivo_origem,
+                                                                df_orcamento.data_carga)\
+                                                .orderBy(df_vendas_realizadas_consolidadas.cod_loja,
+                                                                df_vendas_realizadas_consolidadas.cod_mes, 
+                                                                df_vendas_realizadas_consolidadas.desc_sector)
+
+display(df_vendas_join_realizadas_orcadas)
+
+# COMMAND ----------
+
+df_vendas_join_realizadas_orcadas = df_vendas_join_realizadas_orcadas\
+    .withColumn("quantidade_vendida_orcada_distribuida", f.col("quantidade_vendida_porcentual_distribuicao") * f.col("quantidade_vendida_orc"))\
+    .withColumn("valor_venda_orcado_distribuida", f.col("valor_venda_porcentual_distribuicao") * f.col("valor_venda_orc"))\
+    .withColumn("custo_venda_orcado_distribuido", f.col("custo_venda_porcentual_distribuicao") * f.col("custo_venda_orc"))
+
+display(df_vendas_join_realizadas_orcadas)
+
+# COMMAND ----------
+
+df_fact_orcado = df_vendas_join_realizadas_orcadas.select('id_loja',
+                                                          f.lit(0).alias("id_cliente"),
+                                                          'id_producto',
+                                                          'id_dia',
+                                                          f.col('quantidade_vendida_orcada_distribuida').alias('quantidade_vendida_orcado').cast("float"),
+                                                          f.col('valor_venda_orcado_distribuida').alias('valor_venda_orcado').cast("float"),
+                                                          f.col('custo_venda_orcado_distribuido').alias('custo_venda_orcado').cast("float"))
+
+display(df_fact_orcado)
+
+# COMMAND ----------
+
+df_fact_orcado.write.format("delta").mode("overwrite").saveAsTable("databricks_project.dw_atacadez.fact_orcado")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Carregando a tabela de Fatos Tendencia
+
+# COMMAND ----------
+
+df_tendencia = spark.read.format("delta").load(f"{path_silver}/tbl_tendencia")
+display(df_tendencia)
+
+# COMMAND ----------
+
+df_empresa = spark.table("databricks_project.dw_atacadez.dim_empresa")
+df_cliente = spark.table("databricks_project.dw_atacadez.dim_cliente")
+df_produto = spark.table("databricks_project.dw_atacadez.dim_producto")
+df_tempo = spark.table("databricks_project.dw_atacadez.dim_tiempo")
+
+
+# COMMAND ----------
+
+df_tendencia_empresa = df_tendencia.join(df_empresa, df_tendencia.cod_loja == df_empresa.cod_loja, "inner")
+
+display(df_tendencia_empresa)
+
+# COMMAND ----------
+
+df_tendencia_cliente = df_tendencia_empresa.join(df_cliente, df_tendencia_empresa.cod_cliente == df_cliente.cod_cliente, "inner")
+
+display(df_tendencia_cliente)
+
+# COMMAND ----------
+
+df_tendencia_produto = df_tendencia_cliente.join(df_produto, df_tendencia_cliente.cod_produto == df_produto.cod_producto, "inner")
+
+display(df_tendencia_produto)
+
+# COMMAND ----------
+
+df_tendencia_tempo = df_tendencia_produto.join(df_tempo, df_tendencia_produto.cod_dia == df_tempo.cod_dia, "inner")
+
+display(df_tendencia_tempo)
+
+# COMMAND ----------
+
+df_tendencia_final = df_tendencia_tempo.select("id_loja",
+                                                "id_cliente",
+                                                "id_producto",
+                                                "id_dia",
+                                                "quantidade_vendida_tend",
+                                                'valor_venda_tend',
+                                                'custo_venda_tend')
+
+display(df_tendencia_final)
+
+# COMMAND ----------
+
+df_tendencia_final.write.format("delta").mode("overwrite").saveAsTable("databricks_project.dw_atacadez.fact_tendencia")
