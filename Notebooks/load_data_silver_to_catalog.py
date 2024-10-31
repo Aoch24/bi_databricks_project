@@ -638,7 +638,8 @@ spark.sql("USE databricks_project.dw_atacadez")
 df_vendas_realizadas = spark.sql("""
 SELECT 
 dim_empresa.id_loja, 
-dim_producto.id_producto, 
+dim_producto.id_producto,
+dim_producto.cod_producto, 
 dim_tiempo.id_dia, 
 dim_empresa.cod_loja, 
 dim_departamento.desc_sector, 
@@ -653,7 +654,8 @@ FROM     dim_departamento INNER JOIN
                   dim_tiempo ON fact_venta.id_dia = dim_tiempo.id_dia
 GROUP BY 
 dim_empresa.id_loja, 
-dim_producto.id_producto, 
+dim_producto.id_producto,
+dim_producto.cod_producto,
 dim_tiempo.id_dia, 
 dim_empresa.cod_loja, 
 dim_departamento.desc_sector, 
@@ -767,45 +769,84 @@ display(df_tendencia)
 
 # COMMAND ----------
 
-df_empresa = spark.table("databricks_project.dw_atacadez.dim_empresa")
-df_cliente = spark.table("databricks_project.dw_atacadez.dim_cliente")
-df_produto = spark.table("databricks_project.dw_atacadez.dim_producto")
-df_tempo = spark.table("databricks_project.dw_atacadez.dim_tiempo")
+df_vendas_consolidadas = spark.sql("""
+SELECT dim_empresa.cod_loja, 
+dim_producto.cod_producto,
+dim_tiempo.cod_mes, 
+SUM(fact_venta.cant_vendida) AS quantidade_vendida_total, 
+SUM(fact_venta.valor_venta) AS valor_venda_total, 
+SUM(fact_venta.costo_venta) AS custo_venda_total
+FROM     dim_departamento INNER JOIN
+                  dim_producto ON dim_departamento.cod_sector = dim_producto.cod_sector INNER JOIN
+                  fact_venta ON dim_producto.id_producto = fact_venta.id_producto INNER JOIN
+                  dim_empresa ON fact_venta.id_loja = dim_empresa.id_loja INNER JOIN
+                  dim_tiempo ON fact_venta.id_dia = dim_tiempo.id_dia
+GROUP BY
+dim_empresa.cod_loja, 
+dim_producto.cod_producto, 
+dim_tiempo.cod_mes
+                                   """)
 
-
-# COMMAND ----------
-
-df_tendencia_empresa = df_tendencia.join(df_empresa, df_tendencia.cod_loja == df_empresa.cod_loja, "inner")
-
-display(df_tendencia_empresa)
-
-# COMMAND ----------
-
-df_tendencia_cliente = df_tendencia_empresa.join(df_cliente, df_tendencia_empresa.cod_cliente == df_cliente.cod_cliente, "inner")
-
-display(df_tendencia_cliente)
-
-# COMMAND ----------
-
-df_tendencia_produto = df_tendencia_cliente.join(df_produto, df_tendencia_cliente.cod_produto == df_produto.cod_producto, "inner")
-
-display(df_tendencia_produto)
+display(df_vendas_consolidadas)
 
 # COMMAND ----------
 
-df_tendencia_tempo = df_tendencia_produto.join(df_tempo, df_tendencia_produto.cod_dia == df_tempo.cod_dia, "inner")
+df_vendas_realizadas_consolidadas = df_vendas_realizadas.join(df_vendas_consolidadas,
+                                               (df_vendas_realizadas.cod_loja == df_vendas_consolidadas.cod_loja)
+                                               & (df_vendas_realizadas.cod_mes == df_vendas_consolidadas.cod_mes)
+                                               & (df_vendas_realizadas.cod_producto == df_vendas_consolidadas.cod_producto),
+                                               "inner")\
+                                                .drop(df_vendas_consolidadas.cod_loja,
+                                                                df_vendas_consolidadas.cod_mes, 
+                                                                df_vendas_consolidadas.cod_producto)\
+                                                .orderBy(df_vendas_realizadas.cod_loja,
+                                                                df_vendas_realizadas.cod_mes, 
+                                                                df_vendas_realizadas.desc_sector)
 
-display(df_tendencia_tempo)
+display(df_vendas_realizadas_consolidadas)
 
 # COMMAND ----------
 
-df_tendencia_final = df_tendencia_tempo.select("id_loja",
-                                                "id_cliente",
+df_vendas_realizadas_consolidadas = df_vendas_realizadas_consolidadas\
+    .withColumn("quantidade_vendida_porcentual_distribuicao", f.col("quantidade_vendida") / f.col("quantidade_vendida_total"))\
+    .withColumn("valor_venda_porcentual_distribuicao", f.col("valor_venda") / f.col("valor_venda_total"))\
+    .withColumn("custo_venda_porcentual_distribuicao", f.col("custo_venda") / f.col("custo_venda_total"))
+
+# COMMAND ----------
+
+df_vendas_join_realizadas_tendencia = df_vendas_realizadas_consolidadas.join(df_tendencia,
+                                               (df_vendas_realizadas_consolidadas.cod_loja == df_tendencia.cod_loja)
+                                               & (df_vendas_realizadas_consolidadas.cod_mes == df_tendencia.cod_mes)
+                                               & (df_vendas_realizadas_consolidadas.cod_producto == df_tendencia.cod_produto),
+                                               "inner")\
+                                                .drop(df_tendencia.cod_loja,
+                                                                df_tendencia.cod_mes, 
+                                                                df_tendencia.arquivo_origem,
+                                                                df_tendencia.data_carga)\
+                                                .orderBy(df_vendas_realizadas_consolidadas.cod_loja,
+                                                                df_vendas_realizadas_consolidadas.cod_mes, 
+                                                                df_vendas_realizadas_consolidadas.desc_sector)
+
+display(df_vendas_join_realizadas_tendencia)
+
+# COMMAND ----------
+
+df_vendas_join_realizadas_tendencia = df_vendas_join_realizadas_tendencia\
+    .withColumn("quantidade_vendida_tendencia_distribuida", f.col("quantidade_vendida_porcentual_distribuicao") * f.col("quantidade_vendida_tend"))\
+    .withColumn("valor_venda_tendencia_distribuida", f.col("valor_venda_porcentual_distribuicao") * f.col("valor_venda_tend"))\
+    .withColumn("custo_venda_tendencia_distribuido", f.col("custo_venda_porcentual_distribuicao") * f.col("custo_venda_tend"))
+
+display(df_vendas_join_realizadas_tendencia)
+
+# COMMAND ----------
+
+df_tendencia_final = df_vendas_join_realizadas_tendencia.select("id_loja",
+                                                f.lit(0).alias("id_cliente"),
                                                 "id_producto",
                                                 "id_dia",
-                                                "quantidade_vendida_tend",
-                                                'valor_venda_tend',
-                                                'custo_venda_tend')
+                                                f.col('quantidade_vendida_tendencia_distribuida').alias("quantidade_vendida_tend").cast('float'),
+                                                f.col('valor_venda_tendencia_distribuida').alias("valor_venda_tend").cast('float'),
+                                                f.col('custo_venda_tendencia_distribuido').alias("custo_venda_tend").cast('float'))
 
 display(df_tendencia_final)
 

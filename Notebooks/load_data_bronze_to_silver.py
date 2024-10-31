@@ -513,7 +513,8 @@ display(df_tendencia)
 
 df_tendencia = df_tendencia.withColumn('quantidade_vendida_tend', f.col('quantidade_vendida_tend').cast('float'))\
                         .withColumn('custo_venda_tend', f.col('custo_venda_tend').cast('float'))\
-                        .withColumn('valor_venda_tend', f.col('valor_venda_tend').cast('float'))
+                        .withColumn('valor_venda_tend', f.col('valor_venda_tend').cast('float'))\
+                        .withColumn("cod_mes", f.concat(f.regexp_extract("cod_dia", r"^(\d{4})", 1), f.lit("_"), f.regexp_extract("cod_dia", r"^\d{4}(\d{2})", 1)))
 
 # COMMAND ----------
 
