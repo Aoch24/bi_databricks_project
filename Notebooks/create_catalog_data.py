@@ -106,6 +106,21 @@
 
 # COMMAND ----------
 
+# MAGIC %sql
+# MAGIC CREATE TABLE IF NOT EXISTS dim_tiempo_consolidado (
+# MAGIC     cod_mes STRING NOT NULL,
+# MAGIC     desc_mes STRING NOT NULL,
+# MAGIC     cod_trimestre STRING NOT NULL,
+# MAGIC     desc_trimestre STRING NOT NULL,
+# MAGIC     cod_semestre STRING NOT NULL,
+# MAGIC     desc_semestre STRING NOT NULL,
+# MAGIC     cod_ano STRING NOT NULL,
+# MAGIC     PRIMARY KEY (cod_mes, cod_trimestre, cod_semestre, cod_ano)
+# MAGIC ) USING DELTA;
+# MAGIC
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC # 3. Inserindo os dados ND
 
@@ -201,3 +216,35 @@
 # MAGIC FOREIGN KEY (id_producto) REFERENCES dim_producto(id_producto),
 # MAGIC FOREIGN KEY (id_dia) REFERENCES dim_tiempo(id_dia)
 # MAGIC ) USING DELTA;
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC CREATE TABLE IF NOT EXISTS agg_kpis (
+# MAGIC     cod_mes STRING NOT NULL,
+# MAGIC     cod_trimestre STRING NOT NULL,
+# MAGIC     cod_semestre STRING NOT NULL,
+# MAGIC     cod_ano STRING NOT NULL,
+# MAGIC     total_quantidade_vendida DOUBLE,
+# MAGIC     total_valor_venda DOUBLE,
+# MAGIC     total_custo_venda DOUBLE,
+# MAGIC     total_quantidade_vendida_orcado DOUBLE,
+# MAGIC     total_valor_venda_orcado DOUBLE,
+# MAGIC     total_custo_venda_orcado DOUBLE,
+# MAGIC     total_quantidade_vendida_tend DOUBLE,
+# MAGIC     total_valor_venda_tend DOUBLE,
+# MAGIC     total_custo_venda_tend DOUBLE,
+# MAGIC     kpi_quantidade_real_orcado DOUBLE,
+# MAGIC     kpi_valor_venda_real_orcado DOUBLE,
+# MAGIC     kpi_quantidade_tendencia_orcado DOUBLE,
+# MAGIC     kpi_valor_venda_tendencia_orcado DOUBLE,
+# MAGIC     KPI_Quantidade_Como_Estou INT,
+# MAGIC     KPI_Quantidade_Como_Estarei INT,
+# MAGIC     KPI_Valor_da_Venda_Como_Estou INT,
+# MAGIC     KPI_Valor_da_Venda_Como_Estarei INT,
+# MAGIC     CONSTRAINT fk_cod_mes FOREIGN KEY (cod_mes) REFERENCES dim_tiempo(cod_mes),
+# MAGIC     CONSTRAINT fk_cod_trimestre FOREIGN KEY (cod_trimestre) REFERENCES dim_tiempo(cod_trimestre),
+# MAGIC     CONSTRAINT fk_cod_semestre FOREIGN KEY (cod_semestre) REFERENCES dim_tiempo(cod_semestre),
+# MAGIC     CONSTRAINT fk_cod_ano FOREIGN KEY (cod_ano) REFERENCES dim_tiempo(cod_ano)
+# MAGIC ) USING DELTA;
+# MAGIC

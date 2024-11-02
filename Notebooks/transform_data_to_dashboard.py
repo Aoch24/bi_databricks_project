@@ -22,155 +22,100 @@ df_vendas.display()
 
 # COMMAND ----------
 
-df_tendencia_presente = spark.sql("""
-SELECT        
-fact_tendencia.id_loja, 
-fact_tendencia.id_cliente, 
-fact_tendencia.id_producto, 
-dim_tempo_2.id_dia,
-fact_tendencia.quantidade_vendida_tend, 
-fact_tendencia.valor_venda_tend, 
-fact_tendencia.custo_venda_tend
-FROM            
-fact_tendencia 
-INNER JOIN dim_tiempo ON fact_tendencia.id_dia = dim_tiempo.id_dia 
-INNER JOIN dim_tiempo as dim_tempo_2 ON DATEADD(MONTH, -6, dim_tiempo.dia) = dim_tempo_2.dia
-                                """)
+df_vendas_orcado = spark.sql("""
+WITH VentasAggregated AS (
+    SELECT
+        id_loja,
+        id_producto,
+        id_dia,
+        SUM(cant_vendida) AS quantidade_vendida,
+        SUM(valor_venta) AS valor_venda,
+        SUM(costo_venta) AS custo_venda
+    FROM fact_venta
+    GROUP BY id_loja, id_producto, id_dia
+)
 
-# COMMAND ----------
-
-display(df_tendencia_presente)
-
-# COMMAND ----------
-
-df_tendencia_presente.createOrReplaceTempView("tendencia_presente_view")
-
-# COMMAND ----------
-
-df_vendas_realizadas = spark.sql("""
 SELECT
-id_loja,
-id_dia,
-id_producto,
-sum(cant_vendida) as cant_vendida,
-sum(valor_venta) as valor_venta,
-sum(costo_venta) as costo_venta
-FROM
-    fact_venta
-GROUP BY id_loja, id_dia, id_producto
-ORDER BY id_dia, id_loja, id_producto
+    t.cod_mes,
+    v.id_producto,
+    v.id_loja,
+    SUM(v.quantidade_vendida) AS quantidade_vendida,
+    SUM(v.valor_venda) AS valor_venda,                  
+    SUM(v.custo_venda) AS custo_venda,                 
+    COALESCE(SUM(o.quantidade_vendida_orcado), 0) AS quantidade_vendida_orcado,
+    COALESCE(SUM(o.valor_venda_orcado), 0) AS valor_venda_orcado,
+    COALESCE(SUM(o.custo_venda_orcado), 0) AS custo_venda_orcado
+FROM VentasAggregated v
+LEFT JOIN fact_orcado o ON v.id_loja = o.id_loja 
+                        AND v.id_producto = o.id_producto 
+                        AND v.id_dia = o.id_dia 
+INNER JOIN dim_producto p ON v.id_producto = p.id_producto
+INNER JOIN dim_departamento d ON p.cod_sector = d.cod_sector
+INNER JOIN dim_tiempo t ON v.id_dia = t.id_dia
+INNER JOIN dim_empresa e ON v.id_loja = e.id_loja
+--WHERE e.cod_loja = '10' AND d.desc_sector = 'Bebidas'
+GROUP BY t.cod_mes, v.id_loja, v.id_producto
+ORDER BY t.cod_mes, v.id_loja, v.id_producto;
     """)
 
 
 # COMMAND ----------
 
-df_vendas_realizadas.createOrReplaceTempView("vendas_realizadas_view")
+from pyspark.sql import Window
+
+window_spec = Window.orderBy("cod_mes")
+df_vendas_orcado_tendencia = df_vendas_orcado.withColumn("valor_anterior", f.lag(f.col("quantidade_vendida"), 1).over(window_spec))
+
+df_vendas_orcado_tendencia = df_vendas_orcado_tendencia.withColumn("quantidade_vendida_tendencia", 
+                   f.when(f.col("valor_anterior").isNotNull(), 
+                        f.when(f.col("quantidade_vendida") > f.col("valor_anterior"), 1)
+                        .when(f.col("quantidade_vendida") < f.col("valor_anterior"), -1)
+                        .otherwise(0))
+                   .otherwise(0))\
+                       .drop("valor_anterior")
 
 # COMMAND ----------
 
-df_kpis_vendas = spark.sql("""
-SELECT
-    COALESCE(v.id_loja, o.id_loja) AS id_loja,
-    COALESCE(v.id_dia, o.id_dia) AS id_dia,
-    COALESCE(v.id_producto, o.id_producto) AS id_producto,
-    v.cant_vendida,
-    v.valor_venta,
-    v.costo_venta,
-    o.quantidade_vendida_orcado,
-    o.valor_venda_orcado,
-    o.custo_venda_orcado,
-    tp.quantidade_vendida_tend,
-    tp.valor_venda_tend,
-    tp.custo_venda_tend
-FROM
-    vendas_realizadas_view v
-FULL OUTER JOIN
-    fact_orcado o
-ON
-    v.id_loja = o.id_loja AND v.id_dia = o.id_dia AND v.id_producto = o.id_producto
-LEFT JOIN
-    tendencia_presente_view tp
-ON
-    COALESCE(v.id_loja, o.id_loja) = tp.id_loja
-    AND COALESCE(v.id_dia, o.id_dia) = tp.id_dia
-    AND COALESCE(v.id_producto, o.id_producto) = tp.id_producto;
-          """)
 
-display(df_kpis_vendas)
+window_spec = Window.orderBy("cod_mes")
+df_vendas_orcado_tendencia = df_vendas_orcado_tendencia.withColumn("valor_venda_anterior", f.lag(f.col("valor_venda"), 1).over(window_spec))
+
+df_vendas_orcado_tendencia = df_vendas_orcado_tendencia.withColumn("valor_venda_tendencia", 
+                   f.when(f.col("valor_venda_anterior").isNotNull(), 
+                        f.when(f.col("valor_venda") > f.col("valor_venda_anterior"), 1)
+                        .when(f.col("valor_venda") < f.col("valor_venda_anterior"), -1)
+                        .otherwise(0))
+                   .otherwise(0))\
+                       .drop("valor_venda_anterior")
 
 # COMMAND ----------
 
-df_kpis_vendas.createOrReplaceTempView("kpis_vendas_view")
+display(df_vendas_orcado_tendencia)
 
 # COMMAND ----------
 
-df_kpis_vendas_consolidado = spark.sql("""
-SELECT
-t.cod_mes, 
-t.cod_trimestre,
-t.cod_semestre,
-t.cod_ano,
-sum(k.cant_vendida) as total_quantidade_vendida,
-sum(k.valor_venta) as total_valor_venda,
-sum(k.costo_venta) as total_custo_venda,
-sum(k.quantidade_vendida_orcado) as total_quantidade_vendida_orcado,
-sum(k.valor_venda_orcado) as total_valor_venda_orcado,
-sum(k.custo_venda_orcado) as total_custo_venda_orcado,
-sum(k.quantidade_vendida_tend) as total_quantidade_vendida_tend,
-sum(k.valor_venda_tend) as total_valor_venda_tend,
-sum(k.custo_venda_tend) as total_custo_venda_tend
-FROM kpis_vendas_view k
-INNER JOIN dim_tiempo t ON k.id_dia = t.id_dia
-INNER JOIN dim_producto p ON k.id_producto = p.id_producto
---WHERE k.id_loja = 10 AND p.cod_sector = 'Bebidas'
-GROUP BY t.cod_mes, t.cod_trimestre, t.cod_semestre, t.cod_ano
-          """)
-
-display(df_kpis_vendas_consolidado.orderBy("cod_mes"))
-
-# COMMAND ----------
-
-df_kpis_vendas_consolidado = df_kpis_vendas_consolidado.withColumn('kpi_quantidade_real_orcado',f.col('total_quantidade_vendida') / f.col('total_quantidade_vendida_orcado'))\
-                                .withColumn('kpi_valor_venda_real_orcado',f.col('total_valor_venda') / f.col('total_valor_venda_orcado'))\
-                                .withColumn('kpi_quantidade_tendencia_orcado',f.col('total_quantidade_vendida_tend') / f.col('total_quantidade_vendida_orcado'))\
-                                .withColumn('kpi_valor__venda_tendencia_orcado',f.col('total_valor_venda_tend') / f.col('total_valor_venda_orcado'))
+df_kpis_vendas_consolidado = df_vendas_orcado_tendencia.withColumn('kpi_quantidade_real_orcado',f.col('quantidade_vendida') / f.col('quantidade_vendida_orcado'))\
+                                .withColumn('kpi_valor_venda_real_orcado',f.col('valor_venda') / f.col('valor_venda_orcado'))
 
 display(df_kpis_vendas_consolidado)
 
 # COMMAND ----------
 
 df_kpis_vendas_consolidado = df_kpis_vendas_consolidado.withColumn(
-    "KPI_Quantidade_Como_Estou",
+    "quantidade_vendida_status",
     f.when(f.col("kpi_quantidade_real_orcado") <= 0.9, -1)
      .when((f.col("kpi_quantidade_real_orcado") > 0.9) & (f.col("kpi_quantidade_real_orcado") < 1.1), 0)
      .when(f.col("kpi_quantidade_real_orcado") > 1.1, 1)
-)
-
-df_kpis_vendas_consolidado = df_kpis_vendas_consolidado.withColumn(
-    "KPI_Quantidade_Como_Estarei",
-    f.when(f.col("kpi_quantidade_tendencia_orcado") <= 0.9, -1)
-     .when((f.col("kpi_quantidade_tendencia_orcado") > 0.9) & (f.col("kpi_quantidade_tendencia_orcado") < 1.1), 0)
-     .when(f.col("kpi_quantidade_tendencia_orcado") > 1.1, 1)
-)
-
-# COMMAND ----------
-
-df_kpis_vendas_consolidado = df_kpis_vendas_consolidado.withColumn(
-    "KPI_Valor_da_Venda_Como_Estou",
+)\
+.withColumn(
+    "valor_venda_status",
     f.when(f.col("kpi_valor_venda_real_orcado") <= 0.9, -1)
      .when((f.col("kpi_valor_venda_real_orcado") > 0.9) & (f.col("kpi_valor_venda_real_orcado") < 1.1), 0)
-     .when(f.col("kpi_valor_venda_real_orcado") > 1.1, 1)
-)
-df_kpis_vendas_consolidado = df_kpis_vendas_consolidado.withColumn(
-    "KPI_Valor_da_Venda_Como_Estarei",
-    f.when(f.col("kpi_valor__venda_tendencia_orcado") <= 0.9, -1)
-     .when((f.col("kpi_valor__venda_tendencia_orcado") > 0.9) & (f.col("kpi_valor__venda_tendencia_orcado") < 1.1), 0)
-     .when(f.col("kpi_valor__venda_tendencia_orcado") > 1.1, 1)
-)
+     .when(f.col("kpi_valor_venda_real_orcado") > 1.1, 1))
 
 # COMMAND ----------
 
-display(df_kpis_vendas_consolidado.orderBy('cod_mes'))
+display(df_kpis_vendas_consolidado)
 
 # COMMAND ----------
 
@@ -178,4 +123,39 @@ df_kpis_vendas_consolidado.write.format("delta").mode("overwrite").saveAsTable("
 
 # COMMAND ----------
 
-df_kpis_vendas_consolidado.select(f.mean('KPI_Valor_da_Venda_Como_Estou')).show()
+spark.sql("""
+MERGE INTO dim_tiempo_consolidado AS target
+USING (
+    SELECT
+        cod_mes,
+        desc_mes,
+        cod_trimestre,
+        desc_trimestre,
+        cod_semestre,
+        desc_semestre,
+        cod_ano
+    FROM
+        dim_tiempo
+    GROUP BY
+        cod_mes,
+        desc_mes,
+        cod_trimestre,
+        desc_trimestre,
+        cod_semestre,
+        desc_semestre,
+        cod_ano
+) AS source
+ON target.cod_mes = source.cod_mes  -- o cualquier otra clave que defina la relación
+WHEN MATCHED THEN
+    UPDATE SET
+        target.desc_mes = source.desc_mes,
+        target.cod_trimestre = source.cod_trimestre,
+        target.desc_trimestre = source.desc_trimestre,
+        target.cod_semestre = source.cod_semestre,
+        target.desc_semestre = source.desc_semestre,
+        target.cod_ano = source.cod_ano
+WHEN NOT MATCHED THEN
+    INSERT (cod_mes, desc_mes, cod_trimestre, desc_trimestre, cod_semestre, desc_semestre, cod_ano)
+    VALUES (source.cod_mes, source.desc_mes, source.cod_trimestre, source.desc_trimestre, source.cod_semestre, source.desc_semestre, source.cod_ano);
+
+          """)
