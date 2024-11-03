@@ -61,6 +61,10 @@ ORDER BY t.cod_mes, v.id_loja, v.id_producto;
 
 # COMMAND ----------
 
+display(df_vendas_orcado)
+
+# COMMAND ----------
+
 from pyspark.sql import Window
 
 window_spec = Window.orderBy("cod_mes")
